@@ -9,33 +9,29 @@ const image = document.getElementById("cover"),
   playBtn = document.getElementById("play"),
   nextBtn = document.getElementById("next"),
   background = document.getElementById("bg-img"),
-  volumeSlider = document.getElementById("volume-slider");
+  volumeSlider = document.getElementById("volume-slider"),
+  fileChosen = document.getElementById("file-chosen"),
+  musicUpload = document.getElementById("music-upload"),
+  uploadBtn = document.getElementById("upload-button"),
+  songListDiv = document.getElementById("song-list");
 
 const music = new Audio();
 
-const songs = [
-  {
-    path: "assets/1.mp3",
-    displayName: "The City",
-    cover: "assets/1.jpg",
-    artist: "Destroy Lonely",
-  },
-  {
-    path: "assets/2.mp3",
-    displayName: "Exodus",
-    cover: "assets/2.png",
-    artist: "Destroy Lonely ft Ken Carson",
-  },
-  {
-    path: "assets/3.mp3",
-    displayName: "Free Uzi",
-    cover: "assets/3.png",
-    artist: "Lil Uzi Vert",
-  },
+let songs = [];
+let images = [
+  "assets/image1.jpg",
+  "assets/image2.jpg",
+  "assets/image3.jpg",
+  "assets/image4.jpg",
+  "assets/image5.jpg",
+  "assets/image6.jpg",
 ];
-
+let imageIndex = 0;
+let selectedFile = null;
 let musicIndex = 0;
 let isPlaying = false;
+let db;
+const upload = indexedDB.open("musicDB", 1);
 
 function togglePlay() {
   if (isPlaying) {
@@ -44,6 +40,123 @@ function togglePlay() {
     playMusic();
   }
 }
+
+function songList() {
+  if (!songListDiv) return;
+
+  let list = "<h4>Song List</h4><ul>";
+
+  songs.forEach((song, index) => {
+    const name = (song.displayName || song.name || "Unknown").replace(
+      /\.[^/.]+$/,
+      ""
+    );
+    list += `<li${
+      index === musicIndex ? ' class="active"' : ""
+    } data-index="${index}">${name} <span style="font-size:12px;color:#888;">${
+      song.artist ? " - " + song.artist : ""
+    }</span></li>`;
+  });
+  list += "</ul>";
+  songListDiv.innerHTML = list;
+
+  songListDiv.querySelectorAll("li").forEach((li) => {
+    li.addEventListener("click", function () {
+      const index = parseInt(this.getAttribute("data-index"));
+      if (!isNaN(index)) {
+        musicIndex = index;
+        loadMusic(songs[musicIndex]);
+        playMusic();
+        songList();
+      }
+    });
+  });
+}
+
+function loadSongs(callback) {
+  const transaction = db.transaction(["songs"], "readonly");
+  const store = transaction.objectStore("songs");
+  const request = store.getAll();
+
+  request.onsuccess = function (evt) {
+    songs = evt.target.result;
+
+    if (songs.length > 0) {
+      loadMusic(songs[musicIndex]);
+      if (callback) callback();
+    }
+    songList();
+  };
+}
+
+function loadMusic(song) {
+  if (song.data) {
+    const blob = new Blob([song.data]);
+    music.src = URL.createObjectURL(blob);
+    title.textContent = (song.displayName || song.name).replace(
+      /\.[^/.]+$/,
+      ""
+    );
+    artist.textContent = song.artist || "Unknown Artist";
+    imageIndex = Math.floor(Math.random() * images.length);
+    image.src = images[imageIndex];
+    background.src = images[imageIndex];
+  } else {
+    music.src = song.path;
+    title.textContent = song.name;
+    artist.textContent = song.artist;
+
+    imageIndex = Math.floor(Math.random() * images.length);
+    image.src = images[imageIndex];
+    background.src = images[imageIndex];
+  }
+}
+
+upload.onsuccess = function (evt) {
+  db = evt.target.result;
+  loadSongs();
+};
+
+upload.onupgradeneeded = function (evt) {
+  db = evt.target.result;
+  if (!db.objectStoreNames.contains("songs")) {
+    db.createObjectStore("songs", { keyPath: "id", autoIncrement: true });
+  }
+};
+
+upload.onerror = function (evt) {
+  console.error("DB error:" + evt.target.errorCode);
+};
+
+uploadBtn.addEventListener("click", function () {
+  if (selectedFile && db) {
+    const reader = new FileReader();
+    reader.onload = function (evt) {
+      const transaction = db.transaction(["songs"], "readwrite");
+      const store = transaction.objectStore("songs");
+      const songData = {
+        displayName: selectedFile.name,
+        data: evt.target.result,
+      };
+      const request = store.add(songData);
+      request.onsuccess = function () {
+        loadSongs(playMusic);
+      };
+    };
+    reader.readAsArrayBuffer(selectedFile);
+  } else {
+    musicUpload.click();
+  }
+});
+
+musicUpload.addEventListener("change", function () {
+  if (this.files && this.files[0]) {
+    selectedFile = this.files[0];
+    fileChosen.textContent = `Selected: ${selectedFile.name}`;
+  } else {
+    selectedFile = null;
+  }
+});
 
 function playMusic() {
   isPlaying = true;
@@ -59,15 +172,8 @@ function pauseMusic() {
   music.pause();
 }
 
-function loadMusic(song) {
-  music.src = song.path;
-  title.textContent = song.displayName;
-  artist.textContent = song.artist;
-  image.src = song.cover;
-  background.src = song.cover;
-}
-
 function changeMusic(direction) {
+  if (songs.length === 0) return;
   musicIndex = (musicIndex + direction + songs.length) % songs.length;
   loadMusic(songs[musicIndex]);
   playMusic();
@@ -94,7 +200,14 @@ function setProgressBar(e) {
 }
 
 playBtn.addEventListener("click", togglePlay);
-prevBtn.addEventListener("click", () => changeMusic(-1));
+prevBtn.addEventListener("click", () => {
+  if (music.currentTime > 3) {
+    music.currentTime = 0;
+    playMusic();
+  } else {
+    changeMusic(-1);
+  }
+});
 nextBtn.addEventListener("click", () => changeMusic(1));
 music.addEventListener("ended", () => changeMusic(1));
 music.addEventListener("timeupdate", updateProgressBar);
